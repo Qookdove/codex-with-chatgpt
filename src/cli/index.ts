@@ -56,6 +56,7 @@ import {
 } from "../session/state.js";
 import { appendExecutionRecord } from "../execution/records.js";
 import { saveExecutionOutput } from "../execution/output.js";
+import { registerReviewCommands } from "../review/cli.js";
 
 const program = new Command();
 
@@ -1237,6 +1238,8 @@ function handleCliError(error: unknown, json: boolean): void {
   }
   process.exitCode = 1;
 }
+
+registerReviewCommands(program);
 
 program.parseAsync(process.argv).catch((error: Error) => {
   cross(error.message);

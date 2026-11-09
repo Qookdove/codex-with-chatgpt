@@ -1,0 +1,30 @@
+{
+  "taskId": "c2c_demo",
+  "iteration": 1,
+  "goal": "승인된 변경의 완료 조건과 실제 검증 근거를 대조한다.",
+  "priority": 50,
+  "dependsOn": [],
+  "target": {
+    "commit": null,
+    "fingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "complete": false
+  },
+  "criteria": [
+    {
+      "id": "requested-behavior",
+      "description": "요청한 동작과 검증 결과가 일치한다.",
+      "status": "unknown",
+      "evidence": []
+    }
+  ],
+  "assessment": "evidence_needed",
+  "summary": "형식 예제다. 실제 작업 ID·회차·목표·대상·검증 근거를 입력하기 전에는 완료 판정에 사용할 수 없다.",
+  "nextAction": {
+    "action": "현재 대상과 기존 실행 기록을 확인하고 누락된 근거만 확보한다.",
+    "owner": "기존 실행자와 검토자",
+    "resumeWhen": "실제 작업과 연결된 근거를 읽고 각 완료 조건을 평가할 수 있을 때"
+  },
+  "uncertainties": [
+    "현재 작업공간의 검토 대상과 실제 실행 결과를 아직 연결하지 않았다."
+  ]
+}

@@ -6,6 +6,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { startBridge, type Bridge } from "../src/bridge/server.js";
 import { appendExecutionRecord } from "../src/execution/records.js";
 import { saveExecutionOutput } from "../src/execution/output.js";
+import { captureReviewTarget, recordReview, recordDecision } from "../src/review/manager.js";
 import { makeTmpDir, cleanup, write, makeGitRepo, git, isolateStateDir } from "./helpers.js";
 
 let root: string;
@@ -76,7 +77,10 @@ afterAll(async () => {
 });
 
 describe("MCP tools over Streamable HTTP", () => {
-  it("lists all nine read-only tools", async () => {
+  it("lists all eleven read-only tools", async () => {
+    const instructions = client.getInstructions();
+    expect(instructions).toContain("omit the generated id, createdAt, executionFingerprint and evidenceFingerprint");
+    expect(instructions).toContain("Copy target from the current summary");
     const { tools } = await client.listTools();
     const names = tools.map((tool) => tool.name).sort();
     expect(names).toEqual([
@@ -86,6 +90,8 @@ describe("MCP tools over Streamable HTTP", () => {
       "git_status",
       "list_directory",
       "read_file",
+      "review_inbox",
+      "review_summary",
       "search_workspace",
       "test_status",
       "workspace_info",
@@ -104,6 +110,8 @@ describe("MCP tools over Streamable HTTP", () => {
     expectToolOutputSchema(tools, "test_status", ["available", "tests", "outputAvailable", "outputId"]);
     expectToolOutputSchema(tools, "execution_summary", ["records"]);
     expectToolOutputSchema(tools, "execution_output", ["action", "items", "text"]);
+    expectToolOutputSchema(tools, "review_summary", ["target", "items"]);
+    expectToolOutputSchema(tools, "review_inbox", ["items"]);
   });
 
   it("documents git_diff pagination with its output field names", async () => {
@@ -225,8 +233,10 @@ describe("MCP tools over Streamable HTTP", () => {
       exitStatus: "ok",
       timestamp: new Date().toISOString(),
     });
+    const recordsPath = path.join(stateDir, "executions", `${bridge.workspace.id}.jsonl`);
+    const validRecords = fs.readFileSync(recordsPath, "utf8");
     fs.appendFileSync(
-      path.join(stateDir, "executions", `${bridge.workspace.id}.jsonl`),
+      recordsPath,
       JSON.stringify({
         taskId: "c2c_invalid",
         iteration: null,
@@ -247,6 +257,9 @@ describe("MCP tools over Streamable HTTP", () => {
     expect(summaryResult.isError ?? false).toBe(false);
     const summary = structuredJsonOf<{ records: { taskId: string }[] }>(summaryResult);
     expect(summary.records.map((record) => record.taskId)).toEqual(["c2c_valid_before_invalid"]);
+    // Later tests inspect a fresh, valid execution history. Review acceptance
+    // deliberately fails closed on corruption instead of falling back to old success.
+    fs.writeFileSync(recordsPath, validRecords);
   });
 
   it("execution_output lists readable items and refuses restricted bodies", async () => {
@@ -297,6 +310,52 @@ describe("MCP tools over Streamable HTTP", () => {
     expect(textOf(missing)).toContain("NOT_FOUND");
   });
 
+  it("retrieves local reviews and exact-context user choices through authenticated HTTP", async () => {
+    write(root, ".gitignore", ".env\n");
+    const taskId = "c2c_manager_http";
+    const output = saveExecutionOutput(bridge.workspace.id, {
+      command: "node --test", raw: "1 test passed", exitCode: 0, taskId, iteration: 1,
+    });
+    appendExecutionRecord(bridge.workspace.id, {
+      taskId, iteration: 1, changedFiles: ["hello.txt"], tests: "1 passed", exitStatus: "ok",
+      timestamp: new Date().toISOString(), outputId: output.id, outputAvailable: true,
+    });
+    const input = {
+      taskId, iteration: 1, goal: "Review the recorded result", target: captureReviewTarget(bridge.workspace),
+      criteria: [{ id: "content", description: "Review the changed content", status: "pass", evidence: [
+        { kind: "workspace", path: "hello.txt" }, { kind: "execution-output", outputId: output.id },
+      ] }],
+      assessment: "user_decision", summary: "Implementation reviewed; choose the next scope.",
+      nextAction: { action: "Choose next scope", owner: "user", resumeWhen: "An answer is recorded" },
+      question: { key: "next-scope", text: "Which approved milestone is next?", recommendation: "Keep current priority" },
+    };
+    await recordReview(bridge.workspace, input);
+    const summary = structuredJsonOf<{ target: { fingerprint: string }; items: { record: { taskId: string }; verdict: string }[] }>(
+      await client.callTool({ name: "review_summary", arguments: { task_id: taskId } })
+    );
+    expect(summary.target.fingerprint).toBe(input.target.fingerprint);
+    expect(summary.items).toHaveLength(1);
+    expect(summary.items[0].record.taskId).toBe(taskId);
+    expect(summary.items[0].verdict).toBe("user_decision");
+    const inbox = structuredJsonOf<{ items: { id: string; taskId: string }[] }>(
+      await client.callTool({ name: "review_inbox", arguments: {} })
+    );
+    const question = inbox.items.find((item) => item.taskId === taskId);
+    expect(question).toBeDefined();
+    await recordDecision(bridge.workspace, { questionId: question!.id, answer: "Keep current priority" });
+    const answered = structuredJsonOf<{ items: { taskId: string }[] }>(
+      await client.callTool({ name: "review_inbox", arguments: {} })
+    );
+    expect(answered.items.some((item) => item.taskId === taskId)).toBe(false);
+    // A local answer doesn't turn a review into execution permission or success.
+    const after = structuredJsonOf<{ items: { verdict: string; answered: boolean; decision: { answer: string } }[] }>(
+      await client.callTool({ name: "review_summary", arguments: { task_id: taskId } })
+    );
+    expect(after.items[0].verdict).not.toBe("accept");
+    expect(after.items[0].answered).toBe(true);
+    expect(after.items[0].decision.answer).toBe("Keep current priority");
+  });
+
   it("enforces scopes per tool", async () => {
     const limited = bridge.authStore.issueTokens({ clientId: "limited", scopes: ["workspace.read"] });
     const limitedClient = new Client({ name: "limited", version: "1.0.0" });
@@ -313,6 +372,11 @@ describe("MCP tools over Streamable HTTP", () => {
     });
     expect(outputDenied.isError).toBe(true);
     expect(textOf(outputDenied)).toContain("INSUFFICIENT_SCOPE");
+    for (const name of ["review_summary", "review_inbox"]) {
+      const reviewDenied = await limitedClient.callTool({ name, arguments: {} });
+      expect(reviewDenied.isError).toBe(true);
+      expect(textOf(reviewDenied)).toContain("INSUFFICIENT_SCOPE");
+    }
     const allowed = await limitedClient.callTool({ name: "read_file", arguments: { path: "hello.txt" } });
     expect(allowed.isError ?? false).toBe(false);
     await limitedClient.close();
