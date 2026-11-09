@@ -31,7 +31,7 @@ function readInput(file: string): unknown {
     const bytes = Buffer.alloc(MAX_INPUT_BYTES + 1);
     const count = fs.readSync(fd, bytes, 0, bytes.length, 0);
     if (count > MAX_INPUT_BYTES) throw new Error("Review input exceeds 256 KiB.");
-    return JSON.parse(bytes.subarray(0, count).toString("utf8"));
+    return JSON.parse(bytes.subarray(0, count).toString("utf8").replace(/^\uFEFF/, ""));
   } finally {
     fs.closeSync(fd);
   }

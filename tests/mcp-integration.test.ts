@@ -78,6 +78,9 @@ afterAll(async () => {
 
 describe("MCP tools over Streamable HTTP", () => {
   it("lists all eleven read-only tools", async () => {
+    const instructions = client.getInstructions();
+    expect(instructions).toContain("omit the generated id, createdAt, executionFingerprint and evidenceFingerprint");
+    expect(instructions).toContain("Copy target from the current summary");
     const { tools } = await client.listTools();
     const names = tools.map((tool) => tool.name).sort();
     expect(names).toEqual([

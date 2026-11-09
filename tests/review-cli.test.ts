@@ -127,21 +127,21 @@ describe("c2c review local workflow", () => {
     });
   }, 20_000);
 
-  it("deduplicates genuine user choices and records an answer without auto accepting or resuming the task", () => {
+  it("accepts UTF-8 BOM reviews and answers, deduplicating choices without auto accepting or resuming", () => {
     withEnvironment(({ root, stateDir, workspace }) => {
       execution(workspace, 1);
       const review = {
         ...report(workspace, 1, "user_decision"),
         question: { key: "release", text: "Release this result today?", recommendation: "Review the preview first" },
       };
-      const file = inputFile(stateDir, "question.json", review);
+      const file = write(stateDir, "question.json", "\uFEFF" + JSON.stringify(review));
       json(runReview(root, "record", "--file", file));
       json(runReview(root, "record", "--file", file));
       const inbox = json(runReview(root, "inbox"));
       expect(inbox.items).toHaveLength(1);
       expect(inbox.items[0].text).toBe("Release this result today?");
       const before = readExecutionRecords(workspace.id);
-      const decision = inputFile(stateDir, "decision.json", { questionId: inbox.items[0].id, answer: "Keep the result for preview review" });
+      const decision = write(stateDir, "decision.json", "\uFEFF" + JSON.stringify({ questionId: inbox.items[0].id, answer: "Keep the result for preview review" }));
       json(runReview(root, "decide", "--file", decision));
       expect(json(runReview(root, "inbox")).items).toEqual([]);
       const current = json(runReview(root, "summary", "--task", "c2c_review_cli")).items[0];
