@@ -279,3 +279,25 @@ brief, re-read code through the connector, and resume at NEXT_EXPECTED_STEP.
 Be substantive: why, which file, what to test. No empty one-liners and
 no 40-step epics. Use C2C control messages.
 ```
+
+## Review manager extension
+
+The optional review manager records a detailed review keyed by the existing
+task ID and iteration. Use local `c2c review target`, `review record`,
+`review summary`, `review inbox`, and `review decide` commands; ChatGPT reads
+`review_summary` and `review_inbox` through the existing read-only MCP connection.
+Both tools require `execution.read`. See the [practical runbook](review-manager.md)
+and [example report](../examples/review-manager.json).
+
+Capture the target before review and inspect actual code, diffs and available
+outputs. A target fingerprint identifies reviewed content; it does not attest
+that tests ran against that content. A stored verdict never mutates execution
+state or grants permission. An answer in the owner inbox records a decision,
+but does not automatically resume a paused execution.
+
+Map `accept` to `DONE`, `revise` or `evidence_needed` to a finite next `PLAN`,
+and a genuine `user_decision` to `BLOCKED`. Infrastructure failures remain
+`ERROR`. Preserve existing task IDs, sessions, approval scopes and loop limits.
+Keep detail out of the control message (still <1 KB); resend the same result
+after delivery failure rather than repeating the implementation. Do not create
+new protocol states, replace Project instructions, or re-pair a healthy connection.
